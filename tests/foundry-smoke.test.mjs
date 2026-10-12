@@ -118,6 +118,18 @@ test("window: scan, unused, export, open sheet", async () => {
   await act.scan.call(app);
   assert.equal(app.state.refs.length, 2);
   assert.match(app.state.status, /^2 references in 2 documents/);
+
+  // a single hit reads in the singular, and an encoded picker path is shown decoded
+  app.setTarget("assets/tokens/guard.webp".replace("guard", "gu%61rd"));
+  assert.equal(app.state.display, "assets/tokens/guard.webp");
+  app.setTarget("assets/maps/old%20manor/L1.webp");
+  await app.render();
+  assert.match(app.html, /value="assets\/maps\/old manor\/L1.webp"/);
+  journal[0].pages = [];
+  const j = journal[0]; const orig = j.toObject; j.toObject = () => ({ ...orig(), pages: [] });
+  await act.scan.call(app);
+  assert.match(app.state.status, /^1 reference in 1 document \(/);
+  j.toObject = orig;
   assert.match(app.html, /Old Manor L1/);
 
   app.setTarget("assets", { isFolder: true });

@@ -15,6 +15,10 @@ const MAX_ROWS = 500;
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
+const decodeSafe = (p) => {
+  try { return decodeURIComponent(p ?? ""); } catch { return p ?? ""; }
+};
+
 const looksLikeFolder = (p) => !p || p.endsWith("/") || !/\.[a-z0-9]{2,5}$/i.test(p);
 
 export class StewardApp extends ApplicationV2 {
@@ -49,6 +53,7 @@ export class StewardApp extends ApplicationV2 {
   /** Pre-fill a target, e.g. from the API. */
   setTarget(path, { source = "data", isFolder } = {}) {
     this.state.target = path ?? "";
+    this.state.display = decodeSafe(path); // what the GM sees: spaces, not %20
     this.state.source = source;
     this.state.isFolder = isFolder ?? looksLikeFolder(path);
   }
@@ -63,7 +68,7 @@ export class StewardApp extends ApplicationV2 {
       <div class="fs-bar">
         <label class="fs-label" for="fs-path">${L("Target")}</label>
         <div class="fs-row">
-          <input id="fs-path" type="text" name="path" value="${esc(s.target)}" placeholder="${esc(L("TargetPlaceholder"))}" ${dis}>
+          <input id="fs-path" type="text" name="path" value="${esc(s.display ?? s.target)}" placeholder="${esc(L("TargetPlaceholder"))}" ${dis}>
           <button type="button" data-action="pickFile" ${dis}><i class="fa-solid fa-file-image"></i> ${L("PickFile")}</button>
           <button type="button" data-action="pickFolder" ${dis}><i class="fa-solid fa-folder"></i> ${L("PickFolder")}</button>
         </div>
@@ -85,11 +90,15 @@ export class StewardApp extends ApplicationV2 {
   _onRender(context, options) {
     super._onRender?.(context, options);
     const input = this.element.querySelector("input[name=path]");
-    input?.addEventListener("change", (ev) => this.setTarget(ev.target.value.trim()));
+    input?.addEventListener("change", (ev) => {
+      const v = ev.target.value.trim();
+      if (v !== this.state.display) this.setTarget(v);
+    });
     input?.addEventListener("keydown", (ev) => {
       if (ev.key !== "Enter") return;
       ev.preventDefault();
-      this.setTarget(ev.target.value.trim());
+      const v = ev.target.value.trim();
+      if (v !== this.state.display) this.setTarget(v);
       StewardApp.#onScan.call(this);
     });
   }
@@ -151,7 +160,7 @@ export class StewardApp extends ApplicationV2 {
 
   #readInput() {
     const v = this.element?.querySelector("input[name=path]")?.value?.trim();
-    if (v !== undefined && v !== this.state.target) this.setTarget(v);
+    if (v !== undefined && v !== this.state.display) this.setTarget(v);
   }
 
   /* ---------- actions ---------- */
@@ -191,9 +200,12 @@ export class StewardApp extends ApplicationV2 {
       const refs = this.state.isFolder ? index.findFolder(key) : index.findFile(key);
       this.state.mode = "refs";
       this.state.refs = refs;
+      const docs = ReferenceIndex.countDocuments(refs);
       this.state.status = F("RefsFound", {
         refs: refs.length,
-        docs: ReferenceIndex.countDocuments(refs),
+        refWord: L(refs.length === 1 ? "Word.Ref" : "Word.Refs"),
+        docs,
+        docWord: L(docs === 1 ? "Word.Doc" : "Word.Docs"),
         scanned: index.documents,
         secs: ((performance.now() - t0) / 1000).toFixed(1),
       });
@@ -219,9 +231,7 @@ export class StewardApp extends ApplicationV2 {
       for (const f of files) {
         const key = normalize(f, { requireExtension: false });
         if (key && !index.has(key)) {
-          let display = f;
-          try { display = decodeURIComponent(f); } catch { /* keep */ }
-          unused.push({ path: f, display });
+          unused.push({ path: f, display: decodeSafe(f) });
         }
       }
       unused.sort((a, b) => a.display.localeCompare(b.display));

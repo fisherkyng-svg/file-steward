@@ -19,7 +19,7 @@
     "Listing": "Listing files…",
     "ListProgress": "Listing files… {files} files in {folders} folders",
     "ListTruncated": "Stopped listing at 20,000 files. Pick a smaller folder for a complete report.",
-    "RefsFound": "{refs} references in {docs} documents ({scanned} documents scanned in {secs}s).",
+    "RefsFound": "{refs} {refWord} in {docs} {docWord} ({scanned} documents scanned in {secs}s).",
     "UnusedFound": "{unused} of {files} files are not used by any of the {scanned} documents in this world.",
     "NoRefs": "Nothing in this world references that path.",
     "NoUnused": "Every file in this folder is used by this world.",
@@ -56,6 +56,12 @@
     "Keybinding": {
       "Name": "Open File Steward",
       "Hint": "Opens the File Steward window (GM only)."
+    },
+    "Word": {
+      "Ref": "reference",
+      "Refs": "references",
+      "Doc": "document",
+      "Docs": "documents"
     }
   }
 }

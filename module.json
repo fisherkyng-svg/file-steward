@@ -2,7 +2,7 @@
   "id": "file-steward",
   "title": "File Steward",
   "description": "GM file housekeeping for the Media Browser. Phase 1: find every document that uses a file, and list unused files in a folder. Read-only.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "authors": [
     {
       "name": "CD (fisherkyng-svg)"
