@@ -42,8 +42,10 @@ for pid in $(pgrep -f -- 'main\.(m)?js' || true); do
   tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qE 'resources/app/main|foundry|--dataPath' && { FPID="$pid"; break; }
 done
 DOCKER_ID=""
-if [[ -z "$FPID" ]] && command -v docker >/dev/null 2>&1; then
+if command -v docker >/dev/null 2>&1; then
   DOCKER_ID="$(docker ps --format '{{.ID}} {{.Image}} {{.Names}}' 2>/dev/null | grep -i foundry | head -1 | cut -d' ' -f1 || true)"
+  # A containerized Foundry's node isn't usable from the host.
+  [[ -n "$DOCKER_ID" ]] && FPID=""
 fi
 
 # ---------- Node ----------
@@ -75,6 +77,12 @@ NODE_MAJOR="$("$NODE" -p 'process.versions.node.split(".")[0]')"
 # ---------- Foundry user data path ----------
 detect_userdata() {
   local p
+  # 0) Foundry in Docker: the host folder mounted where the container keeps its data (felddy image: /data)
+  if [[ -n "$DOCKER_ID" ]]; then
+    p="$(docker inspect -f '{{range .Mounts}}{{.Source}}|{{.Destination}}{{println}}{{end}}' "$DOCKER_ID" 2>/dev/null \
+         | while IFS='|' read -r src _; do [[ -d "$src/Data" ]] && { echo "$src"; break; }; done)" || true
+    [[ -n "$p" ]] && { echo "$p"; return; }
+  fi
   # 1) the running Foundry process's own command line
   if [[ -n "$FPID" ]]; then
     p="$(tr '\0' ' ' < "/proc/$FPID/cmdline" | grep -oE -- '--dataPath[= ][^ ]+' | head -1 | sed -E 's/--dataPath[= ]//')" || true
@@ -92,6 +100,7 @@ detect_userdata() {
 }
 
 USERDATA="${FS_USERDATA:-$(detect_userdata || true)}"
+[[ -n "$DOCKER_ID" ]] && say "Foundry is running in Docker (container $DOCKER_ID); using the host folder mounted into it."
 if [[ -z "$USERDATA" ]]; then
   read -r -p "Foundry User Data Path (the folder that contains Data/; Setup → Configuration shows it): " USERDATA
 elif [[ -z "${FS_USERDATA:-}" && -t 0 ]]; then
