@@ -1,0 +1,73 @@
+# Releases are cut from module.json: bump "version", push to main, and this
+# workflow tags v<version> and publishes the Foundry release (skips if that
+# version is already released). Can also be run by hand from the Actions tab.
+#
+# Foundry manifest URL to paste into "Install Module":
+#   https://github.com/<owner>/<repo>/releases/latest/download/module.json
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['module.json']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: v
+        run: |
+          VERSION=$(jq -r .version module.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.v.outputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ steps.v.outputs.tag }} already exists; nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run tests
+        if: steps.check.outputs.exists == 'false'
+        run: node --test tests/*.test.mjs
+
+      - name: Stamp module.json
+        if: steps.check.outputs.exists == 'false'
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          jq --arg url "https://github.com/$REPO" \
+             --arg manifest "https://github.com/$REPO/releases/latest/download/module.json" \
+             --arg download "https://github.com/$REPO/releases/download/$TAG/file-steward.zip" \
+             '.url=$url | .manifest=$manifest | .download=$download' \
+             module.json > module.tmp && mv module.tmp module.json
+
+      - name: Build zip
+        if: steps.check.outputs.exists == 'false'
+        run: zip -r file-steward.zip module.json README.md scripts styles lang
+
+      - name: Publish release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            module.json
+            file-steward.zip
+          generate_release_notes: true

@@ -1,0 +1,31 @@
+{
+  "id": "file-steward",
+  "title": "File Steward",
+  "description": "GM file housekeeping for the Media Browser. Phase 1: find every document that uses a file, and list unused files in a folder. Read-only.",
+  "version": "0.1.0",
+  "authors": [
+    {
+      "name": "CD (fisherkyng-svg)"
+    }
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "14"
+  },
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "styles": [
+    "styles/file-steward.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
+  "url": "https://github.com/fisherkyng-svg/file-steward",
+  "manifest": "",
+  "download": ""
+}

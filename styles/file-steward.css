@@ -1,0 +1,93 @@
+.file-steward .window-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+
+.file-steward .fs-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.file-steward .fs-label {
+  font-weight: 600;
+}
+
+.file-steward .fs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.file-steward .fs-row input[name="path"] {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.file-steward .fs-row button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.file-steward .fs-status {
+  margin: 0;
+  min-height: 1.4em;
+}
+
+.file-steward .fs-notes {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: var(--font-size-12, 12px);
+  opacity: 0.85;
+}
+
+.file-steward .fs-results {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.file-steward .fs-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.file-steward .fs-table th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  background: var(--color-cool-5, rgba(0, 0, 0, 0.6));
+  z-index: 1;
+}
+
+.file-steward .fs-table td,
+.file-steward .fs-table th {
+  padding: 0.25rem 0.4rem;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.file-steward .fs-table a[data-action="openRef"] {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.file-steward .fs-path {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-12, 12px);
+}
+
+.file-steward .fs-kind {
+  font-size: var(--font-size-11, 11px);
+  padding: 0 0.35rem;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  opacity: 0.8;
+}
+
+.file-steward .fs-empty,
+.file-steward .fs-note {
+  opacity: 0.8;
+}

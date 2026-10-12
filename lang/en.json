@@ -1,0 +1,61 @@
+{
+  "FILESTEWARD": {
+    "Title": "File Steward",
+    "GMOnly": "File Steward is available to Gamemasters only.",
+    "Target": "File or folder",
+    "TargetPlaceholder": "assets/maps/old-manor/ or assets/tokens/guard.webp",
+    "PickFile": "File",
+    "PickFolder": "Folder",
+    "FindRefs": "Find references",
+    "FindUnused": "Find unused files",
+    "Export": "Export CSV",
+    "Intro": "Pick a file to see every scene, token, actor, journal and playlist that uses it, or pick a folder to list the files nothing in this world uses. Nothing is changed.",
+    "NeedTarget": "Pick or type a file or folder first.",
+    "NeedFolder": "Find unused files works on a folder. Pick a folder first.",
+    "NoS3": "Find unused files does not support S3 storage yet.",
+    "BadPath": "That doesn't look like a file path.",
+    "Scanning": "Scanning world documents…",
+    "ScanProgress": "Scanning world documents… {done} of {total}",
+    "Listing": "Listing files…",
+    "ListProgress": "Listing files… {files} files in {folders} folders",
+    "ListTruncated": "Stopped listing at 20,000 files. Pick a smaller folder for a complete report.",
+    "RefsFound": "{refs} references in {docs} documents ({scanned} documents scanned in {secs}s).",
+    "UnusedFound": "{unused} of {files} files are not used by any of the {scanned} documents in this world.",
+    "NoRefs": "Nothing in this world references that path.",
+    "NoUnused": "Every file in this folder is used by this world.",
+    "Truncated": "Showing {shown} of {total}. Export CSV for the full list.",
+    "NoSheet": "That document has no sheet to open.",
+    "Error": "File Steward: {message}",
+    "Caveat": {
+      "World": "Only the open world was scanned. Other worlds on this server may use the same files.",
+      "Packs": "{n} world compendium pack(s) were not scanned.",
+      "Code": "Files used only by module or system code, CSS, or hard-coded paths will show as unused. Treat this list as candidates, not proof."
+    },
+    "Kind": {
+      "field": "Field",
+      "html": "In HTML",
+      "text": "In text"
+    },
+    "Col": {
+      "Document": "Document",
+      "Where": "Where",
+      "File": "File",
+      "Kind": "Match"
+    },
+    "Settings": {
+      "CaseSensitive": {
+        "Name": "Case-sensitive paths",
+        "Hint": "Leave on for Linux servers, where Map.webp and map.webp are different files. Turn off for Windows or macOS hosts."
+      },
+      "Menu": {
+        "Name": "File Steward",
+        "Label": "Open File Steward",
+        "Hint": "Find where a file is used, or list unused files in a folder."
+      }
+    },
+    "Keybinding": {
+      "Name": "Open File Steward",
+      "Hint": "Opens the File Steward window (GM only)."
+    }
+  }
+}
