@@ -62,6 +62,32 @@ Then open File Steward and click the server line under the buttons; it should sa
 **Upgrade:** download both files again and rerun `sudo bash install.sh`; config and token are kept.
 **Uninstall:** `sudo bash install.sh --uninstall` (keeps the trash folder, config and token).
 
+### Docker setup (Foundry and the proxy in containers)
+
+If Foundry runs in Docker (for example `felddy/foundryvtt`), run the helper as one more service in the same compose file, so your proxy container can reach it by name. `install.sh` detects this and prints these steps with your real paths and file owner filled in.
+
+```yaml
+  file-steward:
+    image: node:20-alpine
+    user: "1000:1000"            # owner of your Data folder: stat -c '%u:%g' <data>/Data
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    command: ["node", "/app/server.mjs"]
+    environment:
+      FILE_STEWARD_CONFIG: /config/file-steward.json
+    volumes:
+      - /opt/foundry/vtm/data/Data:/foundrydata/Data
+      - /opt/foundry/vtm/data/FileStewardTrash:/foundrydata/FileStewardTrash
+      - /opt/foundry/file-steward/server.mjs:/app/server.mjs:ro
+      - /opt/foundry/file-steward/config:/config
+```
+
+Config (`/opt/foundry/file-steward/config/file-steward.json`):
+`{"userDataPath": "/foundrydata", "trashPath": "/foundrydata/FileStewardTrash", "host": "0.0.0.0", "port": 30013}`
+
+It mounts only `Data/` and the trash, not Foundry's `Config/` or license. It publishes no port, so only containers on the compose network can reach it. Start it with `docker compose up -d file-steward`; the first log line shows the token (`docker compose logs file-steward`). In Caddy, add `reverse_proxy /file-steward/api/* file-steward:30013` to the Foundry site block and reload.
+
 ### How the helper is locked down
 
 | Protection | Detail |

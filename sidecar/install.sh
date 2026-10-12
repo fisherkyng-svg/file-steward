@@ -18,6 +18,7 @@ INSTALL_DIR="/opt/file-steward-sidecar"
 CONF_DIR="/etc/file-steward"
 UNIT="/etc/systemd/system/file-steward.service"
 PORT="${FS_PORT:-30013}"
+API_PATH="/file-steward/api"
 
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
 warn() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
@@ -43,7 +44,8 @@ for pid in $(pgrep -f -- 'main\.(m)?js' || true); do
 done
 DOCKER_ID=""
 if command -v docker >/dev/null 2>&1; then
-  DOCKER_ID="$(docker ps --format '{{.ID}} {{.Image}} {{.Names}}' 2>/dev/null | grep -i foundry | head -1 | cut -d' ' -f1 || true)"
+  # Match the Foundry image itself, not every container whose name mentions foundry (e.g. a Caddy sidecar).
+  DOCKER_ID="$(docker ps --format '{{.ID}} {{.Image}}' 2>/dev/null | awk 'tolower($2) ~ /foundryvtt/ {print $1; exit}' || true)"
   # A containerized Foundry's node isn't usable from the host.
   [[ -n "$DOCKER_ID" ]] && FPID=""
 fi
@@ -111,6 +113,49 @@ USERDATA="$(realpath "$USERDATA")"
 [[ -d "$USERDATA/Data" ]] || die "$USERDATA/Data doesn't exist. Check the path and run again."
 DATA="$USERDATA/Data"
 TRASH="$USERDATA/FileStewardTrash"
+
+if [[ -n "$DOCKER_ID" && -z "${FS_HOST:-}" ]]; then
+  # Foundry (and usually its proxy) run in Docker: a host service on 127.0.0.1 can't be reached
+  # from a proxy container. Run the helper as a container in the same compose project instead.
+  OWNER="$(stat -c '%u:%g' "$DATA")"
+  PROXY_C="$(docker ps --format '{{.Names}} {{.Image}}' | awk 'tolower($2) ~ /caddy|nginx|traefik/ {print $1" ("$2")"; exit}' || true)"
+  COMPOSE_DIR="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$DOCKER_ID" 2>/dev/null || true)"
+  HDIR="${COMPOSE_DIR:-/opt/foundry}/file-steward"
+  say "Foundry runs in Docker, so the helper should run as a container next to it."
+  echo "Nothing has been installed. Do this instead (also in the README, 'Docker setup'):"
+  echo
+  echo "1) Files and config:"
+  echo "   sudo mkdir -p $HDIR/config $TRASH"
+  echo "   sudo curl -fsSL $RELEASE_URL/server.mjs -o $HDIR/server.mjs"
+  echo "   echo '{\"userDataPath\": \"/foundrydata\", \"trashPath\": \"/foundrydata/FileStewardTrash\", \"host\": \"0.0.0.0\", \"port\": $PORT}' | sudo tee $HDIR/config/file-steward.json"
+  echo "   sudo chown -R $OWNER $HDIR/config $TRASH"
+  echo
+  echo "2) Add this service to ${COMPOSE_DIR:-your}/docker-compose file:"
+  cat <<YAML
+  file-steward:
+    image: node:20-alpine
+    user: "$OWNER"
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    command: ["node", "/app/server.mjs"]
+    environment:
+      FILE_STEWARD_CONFIG: /config/file-steward.json
+    volumes:
+      - $DATA:/foundrydata/Data
+      - $TRASH:/foundrydata/FileStewardTrash
+      - $HDIR/server.mjs:/app/server.mjs:ro
+      - $HDIR/config:/config
+YAML
+  echo
+  echo "3) Start it and read the token from its log:"
+  echo "   cd ${COMPOSE_DIR:-<compose folder>} && sudo docker compose up -d file-steward && sudo docker compose logs file-steward"
+  echo
+  echo "4) Proxy${PROXY_C:+ ($PROXY_C)}: route $API_PATH/* to file-steward:$PORT. For Caddy, in the Foundry site block:"
+  echo "       reverse_proxy $API_PATH/* file-steward:$PORT"
+  echo "   then reload Caddy. Set FS_HOST=1 to force a host (systemd) install instead."
+  exit 0
+fi
 
 FUSER="${FS_USER:-$(stat -c %U "$DATA")}"
 if [[ "$FUSER" == "UNKNOWN" ]] || ! id "$FUSER" >/dev/null 2>&1; then
