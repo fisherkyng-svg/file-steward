@@ -2,7 +2,7 @@
   "id": "file-steward",
   "title": "File Steward",
   "description": "GM file housekeeping: find every document that uses a file, list unused files, relink with undo, and \u2014 with the optional server helper \u2014 move, rename and trash files without breaking scenes.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "authors": [
     {
       "name": "CD (fisherkyng-svg)"
