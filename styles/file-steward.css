@@ -91,3 +91,44 @@
 .file-steward .fs-note {
   opacity: 0.8;
 }
+
+.file-steward .fs-twins-bar {
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.file-steward .fs-twin-cell {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.file-steward .fs-twin {
+  font-size: var(--font-size-12, 12px);
+  opacity: 0.85;
+  margin-right: 0.4rem;
+}
+
+.file-steward button.fs-small {
+  display: inline-flex;
+  width: auto;
+  padding: 0 0.5rem;
+  line-height: 1.6;
+  font-size: var(--font-size-12, 12px);
+}
+
+.file-steward .fs-history {
+  justify-content: space-between;
+  border-top: 1px solid var(--color-border-light-tertiary, rgba(255, 255, 255, 0.15));
+  padding-top: 0.4rem;
+  font-size: var(--font-size-13, 13px);
+}
+
+.file-steward-dialog .fs-confirm td {
+  padding: 0.15rem 0.3rem;
+  word-break: break-word;
+}
+
+.file-steward-dialog .fs-path {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-12, 12px);
+}

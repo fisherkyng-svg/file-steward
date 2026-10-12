@@ -2,13 +2,16 @@
 
 GM-only file housekeeping for Foundry VTT v13–v14.
 
-**Phase 1 (0.1.x) is read-only.** It never changes a file or a document.
-
-- **Find references:** pick a file or folder and see every scene, token, tile, actor, item, journal page, playlist sound, macro, table, chat message and world setting that points at it. Click a document name to open its sheet.
-- **Find unused files:** pick a folder and list the files nothing in this world uses.
+- **Find references:** pick a file or folder and see every scene, scene level, token, tile, actor, item, journal page, playlist sound, macro, table, chat message and world setting that points at it. Click a document name to open its sheet.
+- **Find unused files:** pick a folder and list the files nothing in this world uses. Files with a used twin (same name, different type, e.g. `map.webp` next to a used `map.png`) are marked.
+- **Relink** *(0.2)*: point everything that uses a file or folder at another one. Preview first, then one confirmation.
+- **Switch all to WebP** *(0.2)*: from the unused report, relink every used `.png`/`.jpg` to its `.webp` twin in one step. It never switches the other way in bulk.
+- **Undo** *(0.2)*: puts back every field the last change touched. A field edited by hand since then is left alone and reported.
 - **Export CSV** of either report.
 
-Move, rename, delete-to-trash and reference rewriting arrive in later phases.
+File Steward never deletes, moves or uploads files yet. Relink only rewrites paths stored in documents; it does not change scene size, padding, walls or lights.
+
+> **Before your first relink,** back up the world folder (`Data/worlds/<world>`). Undo covers the operations File Steward logs, but a backup covers everything.
 
 ## Install
 
@@ -33,6 +36,17 @@ Bump `"version"` in `module.json` and push to `main`. The Release workflow runs 
   game.modules.get("file-steward").api.open("assets/maps/");
   ```
 
+## How relink stays safe
+
+1. It scans the world and finds every reference to the old path.
+2. It checks each destination file exists. References whose destination is missing are skipped, never pointed at nothing.
+3. It rewrites the path in the spelling it was stored in (`floor%202.webp` stays encoded, `floor 2.webp` stays plain) and refuses values it can't match cleanly.
+4. You confirm the preview. Nothing is written before that.
+5. It records the before and after value of every changed field (last 10 operations, kept in the world).
+6. It rescans and reports any reference still pointing at the old path.
+
+Not rewritten: the world background in world.json (change it in the world's configuration), compendium packs, and paths in module or system code.
+
 ## Macro API
 
 ```js
@@ -40,6 +54,7 @@ const fs = game.modules.get("file-steward").api;
 const refs = await fs.findReferences("assets/tokens/guard.webp");
 const folderRefs = await fs.findReferences("assets/maps/old-manor/", { folder: true });
 // each ref: { rootLabel, rootType, rootUuid, uuid, chain, field, kind, raw, normalized }
+fs.history(); // recent relinks, newest first
 ```
 
 ## What it scans
@@ -54,7 +69,7 @@ Every world document and its embedded documents (tokens and their actor deltas, 
 
 Paths are matched with and without URL encoding (`floor 2.webp` = `floor%202.webp`), as relative or absolute URLs on this server, and with Foundry's route prefix removed.
 
-## Limits (Phase 1)
+## Limits
 
 - Only the open world is scanned. Another world on the same server may use a "unused" file.
 - Compendium packs are not scanned.

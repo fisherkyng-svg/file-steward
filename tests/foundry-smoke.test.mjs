@@ -140,7 +140,7 @@ test("window: scan, unused, export, open sheet", async () => {
 
   act.exportCsv.call(app);
   assert.equal(globalThis.saved.type, "text/csv");
-  assert.match(globalThis.saved.data, /^file\n"assets\/maps\/old manor\/L2.webp"/);
+  assert.match(globalThis.saved.data, /^file,used_twin\n"assets\/maps\/old manor\/L2.webp",""/);
 
   await act.openRef.call(app, null, { dataset: { uuid: "Scene.s1", root: "Scene.s1" } });
   assert.equal(scenes[0].sheet.opened, true);

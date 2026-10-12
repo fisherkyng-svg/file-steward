@@ -1,9 +1,10 @@
 /**
- * File Steward — entry point. Phase 1: read-only reference scanner (GM only).
+ * File Steward — entry point (GM only).
  */
 import { StewardApp } from "./app.js";
 import { MODULE_ID, buildWorldIndex } from "./foundry/world.js";
 import { normalizeFolder } from "./core/paths.js";
+import { registerHistorySetting, getHistory } from "./foundry/rewrite.js";
 
 let app = null;
 
@@ -35,6 +36,8 @@ class OpenStewardMenu extends StewardApp {
  */
 const api = {
   open,
+  /** Recent File Steward changes, newest first. */
+  history: () => getHistory(),
   async findReferences(path, { folder } = {}) {
     if (!game.user?.isGM) throw new Error("File Steward is GM-only");
     const { index, normalize } = await buildWorldIndex();
@@ -45,6 +48,7 @@ const api = {
 };
 
 Hooks.once("init", () => {
+  registerHistorySetting();
   game.settings.register(MODULE_ID, "caseSensitive", {
     name: "FILESTEWARD.Settings.CaseSensitive.Name",
     hint: "FILESTEWARD.Settings.CaseSensitive.Hint",
