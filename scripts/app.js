@@ -2,6 +2,7 @@
  * File Steward — the GM window.
  * 0.1: find references, find unused files, export CSV (read-only).
  * 0.2: relink references to another file or folder, use twins, undo.
+ * 0.3: with the server helper (sidecar): move/rename, move to trash, restore, empty trash.
  */
 import { normalizeFolder } from "./core/paths.js";
 import { ReferenceIndex } from "./core/index.js";
@@ -10,6 +11,7 @@ import {
   MODULE_ID, FilePickerClass, resolveUuid, saveFile, buildWorldIndex, listFiles, worldPackCount,
 } from "./foundry/world.js";
 import { applyChanges, undoRecords, existingFiles, getHistory, pushOperation, markUndone } from "./foundry/rewrite.js";
+import { probe, sidecar } from "./foundry/sidecar.js";
 
 const { ApplicationV2, DialogV2 } = foundry.applications.api;
 const L = (k) => game.i18n.localize(`FILESTEWARD.${k}`);
@@ -29,6 +31,7 @@ const baseName = (p) => decodeSafe(p).split("/").pop();
 /** An unused .webp whose twin in use is not .webp: switching to it is the safe bulk direction. */
 const isWebpUpgrade = (f) => !!f.twin && /\.webp$/i.test(f.path) && !/\.webp$/i.test(f.twin);
 const plural = (n, one, many) => L(n === 1 ? one : many);
+const fmtSize = (b) => (b == null ? "" : b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`);
 
 /** Decoded path for rewriting: no leading slash; folders end in "/". */
 const rewritePath = (p, isFolder) => {
@@ -54,6 +57,15 @@ export class StewardApp extends ApplicationV2 {
       relinkTwin: StewardApp.#onRelinkTwin,
       relinkAllTwins: StewardApp.#onRelinkAllTwins,
       undo: StewardApp.#onUndo,
+      sidecarCheck: StewardApp.#onSidecarCheck,
+      move: StewardApp.#onMove,
+      trashTarget: StewardApp.#onTrashTarget,
+      trashFile: StewardApp.#onTrashFile,
+      trashAllUnused: StewardApp.#onTrashAllUnused,
+      showTrash: StewardApp.#onShowTrash,
+      restoreItem: StewardApp.#onRestoreItem,
+      purgeItem: StewardApp.#onPurgeItem,
+      purgeAll: StewardApp.#onPurgeAll,
     },
   };
 
@@ -64,11 +76,19 @@ export class StewardApp extends ApplicationV2 {
     source: "data",
     busy: false,
     status: "",
-    mode: null, // "refs" | "unused"
+    mode: null, // "refs" | "unused" | "trash"
     refs: [],
     unused: [],
+    trash: [],
+    retentionDays: null,
     notes: [],
+    sidecar: { state: "checking" },
   };
+
+  /** True when the server helper answered with a valid token. */
+  get #helper() {
+    return this.state.sidecar.state === "ok";
+  }
 
   /** Pre-fill a target, e.g. from the API. */
   setTarget(path, { source = "data", isFolder } = {}) {
@@ -98,6 +118,12 @@ export class StewardApp extends ApplicationV2 {
           <button type="button" data-action="relink" ${dis} data-tooltip="${esc(L("RelinkHint"))}"><i class="fa-solid fa-link"></i> ${L("RelinkBtn")}</button>
           <button type="button" data-action="exportCsv" ${hasResults && !s.busy ? "" : "disabled"}><i class="fa-solid fa-file-csv"></i> ${L("Export")}</button>
         </div>
+        ${this.#helper ? `<div class="fs-row fs-actions">
+          <button type="button" data-action="move" ${dis} data-tooltip="${esc(L("MoveHint"))}"><i class="fa-solid fa-file-export"></i> ${L("MoveBtn")}</button>
+          <button type="button" data-action="trashTarget" ${dis}><i class="fa-solid fa-trash-can"></i> ${L("TrashBtn")}</button>
+          <button type="button" data-action="showTrash" ${dis}><i class="fa-solid fa-dumpster"></i> ${L("TrashViewBtn")}</button>
+        </div>` : ""}
+        ${this.#sidecarHTML()}
       </div>
       <p class="fs-status" aria-live="polite">${esc(s.status)}</p>
       ${s.notes.length ? `<ul class="fs-notes">${s.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
@@ -107,6 +133,28 @@ export class StewardApp extends ApplicationV2 {
 
   _replaceHTML(result, content) {
     content.innerHTML = result;
+  }
+
+  async _onFirstRender(context, options) {
+    await super._onFirstRender?.(context, options);
+    this.refreshSidecar();
+  }
+
+  /** Re-check the server helper (e.g. after the GM pastes a token). */
+  async refreshSidecar() {
+    this.state.sidecar = { state: "checking" };
+    this.state.sidecar = await probe();
+    if (this.rendered !== false) this.render();
+  }
+
+  #sidecarHTML() {
+    const sc = this.state.sidecar;
+    const text =
+      sc.state === "ok" ? F("Sidecar.Ok", { version: sc.info?.version ?? "?" })
+      : sc.state === "checking" ? L("Sidecar.Checking")
+      : L(`Sidecar.${sc.state}`);
+    const cls = sc.state === "ok" ? "fs-ok" : sc.state === "no-token" || sc.state === "checking" ? "fs-muted" : "fs-warn";
+    return `<p class="fs-sidecar ${cls}"><a data-action="sidecarCheck" data-tooltip="${esc(L("Sidecar.Recheck"))}"><i class="fa-solid fa-server"></i> ${esc(text)}</a></p>`;
   }
 
   _onRender(context, options) {
@@ -153,6 +201,9 @@ export class StewardApp extends ApplicationV2 {
         ? `<div class="fs-row fs-twins-bar"><span>${esc(F("TwinsFound", { n: twins.length }))}</span>
            ${toWebp.length ? `<button type="button" data-action="relinkAllTwins" ${dis} data-tooltip="${esc(L("RelinkAllTwinsHint"))}"><i class="fa-solid fa-right-left"></i> ${esc(F("RelinkAllTwins", { n: toWebp.length }))}</button>` : ""}</div>`
         : "";
+      const bulkTrash = this.#helper
+        ? `<div class="fs-row fs-twins-bar"><span></span><button type="button" data-action="trashAllUnused" ${dis}><i class="fa-solid fa-trash-can"></i> ${esc(F("TrashAllUnused", { n: s.unused.length }))}</button></div>`
+        : "";
       const rows = s.unused
         .slice(0, MAX_ROWS)
         .map((f) => {
@@ -161,10 +212,33 @@ export class StewardApp extends ApplicationV2 {
                <button type="button" class="fs-small" data-action="relinkTwin" data-from="${esc(f.twin)}" data-to="${esc(f.path)}" ${dis}
                  data-tooltip="${esc(F("UseThisHint", { name: baseName(f.twin) }))}">${L("UseThis")}</button>`
             : "";
-          return `<tr><td class="fs-path">${esc(f.display)}</td><td class="fs-twin-cell">${twin}</td></tr>`;
+          const del = this.#helper
+            ? `<button type="button" class="fs-small" data-action="trashFile" data-path="${esc(f.path)}" ${dis} data-tooltip="${esc(L("TrashOneHint"))}"><i class="fa-solid fa-trash-can"></i></button>`
+            : "";
+          return `<tr><td class="fs-path">${esc(f.display)}</td><td class="fs-twin-cell">${twin}${del}</td></tr>`;
         })
         .join("");
-      return `${bulk}<table class="fs-table"><thead><tr><th>${L("Col.File")}</th><th></th></tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.unused.length)}`;
+      return `${bulk}${bulkTrash}<table class="fs-table"><thead><tr><th>${L("Col.File")}</th><th></th></tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.unused.length)}`;
+    }
+    if (s.mode === "trash") {
+      const dis = s.busy ? "disabled" : "";
+      const retention = s.retentionDays ? F("TrashRetention", { n: s.retentionDays }) : L("TrashKept");
+      if (!s.trash.length) return `<p class="fs-empty">${L("TrashEmpty")}</p><p class="fs-note">${esc(retention)}</p>`;
+      const rows = s.trash
+        .slice(0, MAX_ROWS)
+        .map((t) => `<tr>
+          <td class="fs-path">${t.isDir ? '<i class="fa-solid fa-folder"></i> ' : ""}${esc(t.path)}</td>
+          <td>${esc(fmtSize(t.size))}</td>
+          <td>${esc(new Date(t.trashedAt).toLocaleString())}</td>
+          <td class="fs-twin-cell">
+            <button type="button" class="fs-small" data-action="restoreItem" data-id="${esc(t.id)}" ${dis}><i class="fa-solid fa-rotate-left"></i> ${L("Restore")}</button>
+            <button type="button" class="fs-small" data-action="purgeItem" data-id="${esc(t.id)}" ${dis} data-tooltip="${esc(L("PurgeOneHint"))}"><i class="fa-solid fa-xmark"></i></button>
+          </td></tr>`)
+        .join("");
+      const total = s.trash.reduce((n, t) => n + (t.size ?? 0), 0);
+      return `<div class="fs-row fs-twins-bar"><span>${esc(F("TrashSummary", { n: s.trash.length, size: fmtSize(total) }))} ${esc(retention)}</span>
+          <button type="button" data-action="purgeAll" ${dis}><i class="fa-solid fa-fire"></i> ${L("PurgeAll")}</button></div>
+        <table class="fs-table"><thead><tr><th>${L("Col.Original")}</th><th>${L("Col.Size")}</th><th>${L("Col.Trashed")}</th><th></th></tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.trash.length)}`;
     }
     return `<p class="fs-empty">${L("Intro")}</p>`;
   }
@@ -180,6 +254,10 @@ export class StewardApp extends ApplicationV2 {
   }
 
   #summary(op) {
+    if (op.type === "move") return F("Summary.Move", { from: op.from, to: op.to });
+    if (op.type === "trash") {
+      return op.paths.length === 1 ? F("Summary.TrashOne", { name: op.paths[0] }) : F("Summary.TrashMany", { n: op.paths.length });
+    }
     if (op.pairs?.length === 1) return `${op.pairs[0].from} → ${op.pairs[0].to}`;
     return F("ManyRelinked", { n: op.pairs?.length ?? 0 });
   }
@@ -497,9 +575,13 @@ export class StewardApp extends ApplicationV2 {
   static async #onUndo() {
     const op = getHistory().find((o) => !o.undone);
     if (!op) return;
+    if ((op.type === "move" || op.type === "trash") && !this.#helper) {
+      return ui.notifications.warn(L("Sidecar.NeededForUndo"));
+    }
+    const fields = op.records?.length ?? 0;
     const confirmed = await DialogV2.confirm({
       window: { title: L("UndoTitle"), icon: "fa-solid fa-rotate-left" },
-      content: `<p>${esc(F("UndoConfirm", { n: op.records.length, summary: this.#summary(op) }))}</p>`,
+      content: `<p>${esc(F(op.type === "trash" ? "UndoTrashConfirm" : "UndoConfirm", { n: fields, summary: this.#summary(op) }))}</p>`,
       rejectClose: false,
       modal: true,
     });
@@ -507,17 +589,302 @@ export class StewardApp extends ApplicationV2 {
     const refreshMode = this.state.mode;
     await this.#run(async () => {
       this.#setStatus(L("Applying"));
-      const { restored, conflicts } = await undoRecords(op.records);
+      const notes = [];
+      let restored = 0;
+      if (op.records?.length) {
+        const r = await undoRecords(op.records);
+        restored = r.restored;
+        if (r.conflicts.length) notes.push(F("UndoConflicts", { n: r.conflicts.length }), ...r.conflicts.map((c) => `${c.label}: ${c.reason}`));
+      }
+      // Files: bring the original back first, then send the copy to trash (never delete it outright).
+      if (op.trashIds?.length) {
+        const r = await sidecar.restore(op.trashIds);
+        for (const e of r.errors) notes.push(F("RestoreFailed", { id: e.id, error: e.error }));
+      }
+      if (op.type === "move" && op.copied) {
+        const r = await sidecar.trash([op.copied]);
+        for (const e of r.errors) notes.push(`${e.path}: ${e.error}`);
+      }
       await markUndone(op.id);
-      const status = F("UndoDone", { n: restored });
-      const notes = [
-        ...(conflicts.length ? [F("UndoConflicts", { n: conflicts.length })] : []),
-        ...conflicts.map((c) => `${c.label}: ${c.reason}`),
-      ].slice(0, MAX_NOTES);
       if (refreshMode === "unused" && this.state.isFolder) await this.#computeUnused();
-      this.state.status = status;
-      this.state.notes = notes;
-      ui.notifications.info(status);
+      if (refreshMode === "trash") await this.#loadTrash();
+      this.state.status = op.type === "relink" || op.type === undefined ? F("UndoDone", { n: restored }) : F("UndoFilesDone", { summary: this.#summary(op) });
+      this.state.notes = notes.slice(0, MAX_NOTES);
+      ui.notifications.info(this.state.status);
+    });
+  }
+
+  /* ---------- server helper: move, trash, restore ---------- */
+
+  static async #onSidecarCheck() {
+    await this.refreshSidecar();
+    const st = this.state.sidecar.state;
+    if (st !== "ok") ui.notifications.info(this.state.sidecar.message ? `${L(`Sidecar.${st}`)} (${this.state.sidecar.message})` : L(`Sidecar.${st}`));
+  }
+
+  static async #onMove() {
+    this.#readInput();
+    const s = this.state;
+    if (!s.target) return ui.notifications.warn(L("NeedTarget"));
+    const dest = await DialogV2.prompt({
+      window: { title: L("MoveTitle"), icon: "fa-solid fa-file-export" },
+      content: `<p>${esc(L("MovePrompt"))}</p><input type="text" name="dest" value="${esc(s.display.replace(/\/+$/, ""))}" style="width:100%" autofocus>`,
+      ok: { label: L("MoveNext"), callback: (event, button) => button.form.elements.dest.value.trim() },
+      rejectClose: false,
+    });
+    if (!dest) return;
+    if (rewritePath(dest, s.isFolder) === rewritePath(s.target, s.isFolder)) return ui.notifications.warn(L("SameTarget"));
+    await this.#movePath(s.target, dest, s.isFolder);
+  }
+
+  /**
+   * Move with the helper: copy → relink → verify → trash the original.
+   * The original is only trashed when nothing in the world still points at it.
+   */
+  async #movePath(from, to, isFolder) {
+    const s = this.state;
+    const fromD = decodeSafe(from).replace(/^\/+|\/+$/g, "");
+    const toD = decodeSafe(to).replace(/^\/+|\/+$/g, "");
+    await this.#run(async () => {
+      this.#setStatus(L("Scanning"));
+      const { index, normalize } = await buildWorldIndex(this.#scanProgress);
+      const oldKey = isFolder ? normalizeFolder(normalize, fromD) : normalize(fromD, { requireExtension: false });
+      const refs = isFolder ? index.findFolder(oldKey) : index.findFile(oldKey);
+      const docs = ReferenceIndex.countDocuments(refs);
+
+      const confirmed = await DialogV2.confirm({
+        window: { title: L("MoveTitle"), icon: "fa-solid fa-file-export" },
+        classes: ["file-steward-dialog"],
+        content: `<p class="fs-path">${esc(fromD)} → ${esc(toD)}</p>
+          <p>${esc(F("MoveConfirm", { refs: refs.length, refWord: plural(refs.length, "Word.Ref", "Word.Refs"), docs, docWord: plural(docs, "Word.Doc", "Word.Docs") }))}</p>
+          <p>${esc(L("MoveSafe"))}</p>`,
+        rejectClose: false,
+        modal: true,
+      });
+      if (!confirmed) {
+        s.status = L("Cancelled");
+        return;
+      }
+
+      this.#setStatus(L("Copying"));
+      await sidecar.copy(fromD, toD);
+
+      let result = { records: [], errors: [], applied: 0 };
+      let skipped = [];
+      if (refs.length) {
+        this.#setStatus(L("Applying"));
+        const existing = await existingFiles(s.source, isFolder ? { folders: [toD] } : { files: [toD] });
+        const plan = planRelink(refs, {
+          oldPath: rewritePath(fromD, isFolder),
+          newPath: rewritePath(toD, isFolder),
+          normalize,
+          existing,
+          caseSensitive: game.settings.get(MODULE_ID, "caseSensitive"),
+        });
+        if (plan.changes.length) result = await applyChanges(plan.changes);
+        skipped = [
+          ...plan.missing.map((m) => F("Missing", { label: m.rootLabel, file: decodeSafe(m.newRaw) })),
+          ...plan.failed.map((f) => F("Failed", { label: f.rootLabel, raw: f.raw })),
+        ];
+      }
+
+      const after = await buildWorldIndex();
+      const remaining = (isFolder ? after.index.findFolder(oldKey) : after.index.findFile(oldKey)).length;
+      let trashIds = [];
+      if (!remaining) {
+        const t = await sidecar.trash([fromD]);
+        trashIds = t.items.map((i) => i.id);
+        for (const e of t.errors) skipped.push(`${e.path}: ${e.error}`);
+      }
+
+      await pushOperation({
+        id: foundry.utils.randomID(),
+        time: Date.now(),
+        type: "move",
+        user: game.user.name,
+        from: fromD,
+        to: toD,
+        isFolder,
+        copied: toD,
+        records: result.records,
+        trashIds,
+      });
+
+      this.setTarget(toD, { source: s.source, isFolder });
+      s.mode = "refs";
+      const newKey = isFolder ? normalizeFolder(after.normalize, toD) : after.normalize(toD, { requireExtension: false });
+      s.refs = isFolder ? after.index.findFolder(newKey) : after.index.findFile(newKey);
+      s.status = remaining
+        ? F("MoveKept", { n: remaining })
+        : F("MoveDone", { to: toD, applied: result.applied, refWord: plural(result.applied, "Word.Ref", "Word.Refs") });
+      s.notes = [...result.errors.map((e) => `${e.label}: ${e.reason}`), ...skipped].slice(0, MAX_NOTES);
+      ui.notifications.info(s.status);
+    });
+  }
+
+  static async #onTrashTarget() {
+    this.#readInput();
+    if (!this.state.target) return ui.notifications.warn(L("NeedTarget"));
+    await this.#trashPaths([{ path: this.state.target, isFolder: this.state.isFolder }], { fromUnused: false });
+  }
+
+  static async #onTrashFile(event, target) {
+    await this.#trashPaths([{ path: target.dataset.path, isFolder: false }], { fromUnused: true });
+  }
+
+  static async #onTrashAllUnused() {
+    await this.#trashPaths(this.state.unused.map((f) => ({ path: f.path, isFolder: false })), { fromUnused: true });
+  }
+
+  /**
+   * Move files or folders to the helper's trash. Files still in use are blocked:
+   * from the unused report they are dropped; for a single target the GM must confirm twice.
+   */
+  async #trashPaths(items, { fromUnused }) {
+    const s = this.state;
+    const refreshMode = s.mode;
+    await this.#run(async () => {
+      this.#setStatus(L("Scanning"));
+      const { index, normalize } = await buildWorldIndex(this.#scanProgress);
+      const withRefs = items.map((it) => {
+        const d = decodeSafe(it.path).replace(/^\/+|\/+$/g, "");
+        const key = it.isFolder ? normalizeFolder(normalize, d) : normalize(d, { requireExtension: false });
+        const refs = key ? (it.isFolder ? index.findFolder(key) : index.findFile(key)) : [];
+        return { ...it, display: d, refs };
+      });
+      const used = withRefs.filter((w) => w.refs.length);
+      let go = withRefs.filter((w) => !w.refs.length);
+      const notes = [];
+
+      if (used.length && fromUnused) {
+        // The world changed since the report: never trash something that is now in use.
+        notes.push(F("NowInUse", { n: used.length }), ...used.map((u) => u.display));
+      } else if (used.length) {
+        const u = used[0];
+        const docs = ReferenceIndex.countDocuments(u.refs);
+        const anyway = await DialogV2.confirm({
+          window: { title: L("StillUsedTitle"), icon: "fa-solid fa-triangle-exclamation" },
+          classes: ["file-steward-dialog"],
+          content: `<p class="fs-path">${esc(u.display)}</p>
+            <p>${esc(F("StillUsed", { refs: u.refs.length, refWord: plural(u.refs.length, "Word.Ref", "Word.Refs"), docs, docWord: plural(docs, "Word.Doc", "Word.Docs") }))}</p>
+            <ul>${[...new Set(u.refs.map((r) => r.rootLabel))].slice(0, 10).map((l) => `<li>${esc(l)}</li>`).join("")}</ul>
+            <p><strong>${esc(L("StillUsedWarn"))}</strong></p>`,
+          yes: { label: L("TrashAnyway"), icon: "fa-solid fa-trash-can" },
+          no: { label: L("Keep"), default: true },
+          rejectClose: false,
+          modal: true,
+        });
+        if (!anyway) {
+          s.status = L("Cancelled");
+          return;
+        }
+        go = withRefs;
+      }
+
+      if (!go.length) {
+        s.status = L("NothingToTrash");
+        s.notes = notes.slice(0, MAX_NOTES);
+        return;
+      }
+
+      const list = go.slice(0, 15).map((g) => `<li class="fs-path">${esc(g.display)}</li>`).join("");
+      const more = go.length > 15 ? `<p>${esc(F("MoreRows", { n: go.length - 15 }))}</p>` : "";
+      const ok = await DialogV2.confirm({
+        window: { title: L("TrashTitle"), icon: "fa-solid fa-trash-can" },
+        classes: ["file-steward-dialog"],
+        content: `<p>${esc(F("TrashConfirm", { n: go.length }))}</p><ul>${list}</ul>${more}<p>${esc(L("TrashSafe"))}</p>`,
+        rejectClose: false,
+        modal: true,
+      });
+      if (!ok) {
+        s.status = L("Cancelled");
+        return;
+      }
+
+      this.#setStatus(L("Trashing"));
+      const res = await sidecar.trash(go.map((g) => g.display));
+      for (const e of res.errors) notes.push(`${e.path}: ${e.error}`);
+      if (res.items.length) {
+        await pushOperation({
+          id: foundry.utils.randomID(),
+          time: Date.now(),
+          type: "trash",
+          user: game.user.name,
+          paths: res.items.map((i) => i.path),
+          trashIds: res.items.map((i) => i.id),
+          records: [],
+        });
+      }
+      if (refreshMode === "unused" && s.isFolder) await this.#computeUnused();
+      else if (!fromUnused) {
+        s.mode = null;
+        this.setTarget("", { isFolder: true });
+      }
+      s.status = F("TrashDone", { n: res.items.length });
+      s.notes = notes.slice(0, MAX_NOTES);
+      ui.notifications.info(s.status);
+    });
+  }
+
+  async #loadTrash() {
+    const res = await sidecar.listTrash();
+    this.state.mode = "trash";
+    this.state.trash = res.items;
+    this.state.retentionDays = res.retentionDays;
+    this.state.status = "";
+  }
+
+  static async #onShowTrash() {
+    await this.#run(() => this.#loadTrash());
+  }
+
+  static async #onRestoreItem(event, target) {
+    const id = target.dataset.id;
+    await this.#run(async () => {
+      const r = await sidecar.restore([id]);
+      await this.#loadTrash();
+      this.state.status = r.restored.length ? F("RestoredTo", { path: r.restored[0].path }) : L("RestoreNone");
+      this.state.notes = r.errors.map((e) => F("RestoreFailed", { id: e.id, error: e.error }));
+    });
+  }
+
+  static async #onPurgeItem(event, target) {
+    const item = this.state.trash.find((t) => t.id === target.dataset.id);
+    if (!item) return;
+    const ok = await DialogV2.confirm({
+      window: { title: L("PurgeTitle"), icon: "fa-solid fa-fire" },
+      classes: ["file-steward-dialog"],
+      content: `<p class="fs-path">${esc(item.path)}</p><p><strong>${esc(L("PurgeWarn"))}</strong></p>`,
+      yes: { label: L("PurgeYes") },
+      no: { label: L("Keep"), default: true },
+      rejectClose: false,
+      modal: true,
+    });
+    if (!ok) return;
+    await this.#run(async () => {
+      await sidecar.purge({ ids: [item.id] });
+      await this.#loadTrash();
+      this.state.status = F("PurgedN", { n: 1 });
+    });
+  }
+
+  static async #onPurgeAll() {
+    const n = this.state.trash.length;
+    if (!n) return;
+    const ok = await DialogV2.confirm({
+      window: { title: L("PurgeTitle"), icon: "fa-solid fa-fire" },
+      classes: ["file-steward-dialog"],
+      content: `<p>${esc(F("PurgeAllConfirm", { n }))}</p><p><strong>${esc(L("PurgeWarn"))}</strong></p>`,
+      yes: { label: L("PurgeYes") },
+      no: { label: L("Keep"), default: true },
+      rejectClose: false,
+      modal: true,
+    });
+    if (!ok) return;
+    await this.#run(async () => {
+      const r = await sidecar.purge({ all: true });
+      await this.#loadTrash();
+      this.state.status = F("PurgedN", { n: r.purged });
     });
   }
 }

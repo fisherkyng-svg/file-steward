@@ -40,7 +40,10 @@
       "Document": "Document",
       "Where": "Where",
       "File": "File",
-      "Kind": "Match"
+      "Kind": "Match",
+      "Original": "Original location",
+      "Size": "Size",
+      "Trashed": "Trashed"
     },
     "Settings": {
       "CaseSensitive": {
@@ -51,6 +54,14 @@
         "Name": "File Steward",
         "Label": "Open File Steward",
         "Hint": "Find where a file is used, or list unused files in a folder."
+      },
+      "SidecarToken": {
+        "Name": "Server helper token",
+        "Hint": "From the sidecar installer's output. Stored only in this browser; players never receive it."
+      },
+      "SidecarUrl": {
+        "Name": "Server helper URL",
+        "Hint": "Leave empty to use this server's /file-steward/api route. Stored only in this browser."
       }
     },
     "Keybinding": {
@@ -99,6 +110,65 @@
       "Unchanged": "value no longer matches; left alone",
       "ChangedSince": "changed since the relink; left alone"
     },
-    "RelinkAllTwinsHint": "Point everything using a .png or .jpg at its .webp twin. Smaller files, same picture; you'll see a preview first."
+    "RelinkAllTwinsHint": "Point everything using a .png or .jpg at its .webp twin. Smaller files, same picture; you'll see a preview first.",
+    "MoveBtn": "Move / rename…",
+    "MoveHint": "Move or rename this file or folder on the server, and update everything that uses it.",
+    "MoveTitle": "Move or rename",
+    "MovePrompt": "New path (change the folder, the name, or both):",
+    "MoveNext": "Next",
+    "MoveConfirm": "{refs} {refWord} in {docs} {docWord} will be updated to the new path.",
+    "MoveSafe": "The file is copied first and references are updated. The original goes to trash only if nothing still points at it. You can undo this.",
+    "Copying": "Copying on the server…",
+    "MoveDone": "Moved to {to}; {applied} {refWord} updated. The original is in the trash.",
+    "MoveKept": "Copied and relinked, but {n} reference(s) still point at the original, so it was kept. See the notes below.",
+    "TrashBtn": "Move to trash",
+    "TrashViewBtn": "Trash",
+    "TrashTitle": "Move to trash",
+    "TrashConfirm": "Move {n} item(s) to the File Steward trash?",
+    "TrashSafe": "Trash keeps them outside Foundry's Data folder until you empty it. You can restore them.",
+    "Trashing": "Moving to trash…",
+    "TrashDone": "Moved {n} item(s) to trash.",
+    "TrashAllUnused": "Move all to trash ({n})",
+    "TrashOneHint": "Move this file to trash",
+    "NothingToTrash": "Nothing was moved to trash.",
+    "NowInUse": "{n} file(s) became used since the report and were left alone:",
+    "StillUsedTitle": "Still in use",
+    "StillUsed": "This is still used by {refs} {refWord} in {docs} {docWord}:",
+    "StillUsedWarn": "Trashing it will break those references until you restore it.",
+    "TrashAnyway": "Trash anyway",
+    "Keep": "Keep it",
+    "TrashEmpty": "The trash is empty.",
+    "TrashKept": "Items stay until you empty the trash.",
+    "TrashRetention": "Items are purged automatically after {n} days.",
+    "TrashSummary": "{n} item(s), {size}.",
+    "Restore": "Restore",
+    "RestoredTo": "Restored to {path}.",
+    "RestoreNone": "Nothing was restored.",
+    "RestoreFailed": "Couldn't restore {id}: {error}",
+    "PurgeOneHint": "Delete forever",
+    "PurgeAll": "Empty trash",
+    "PurgeTitle": "Delete forever",
+    "PurgeWarn": "This permanently deletes the files from the server. It can't be undone.",
+    "PurgeYes": "Delete forever",
+    "PurgeAllConfirm": "Permanently delete all {n} item(s) in the trash?",
+    "PurgedN": "Deleted {n} item(s) forever.",
+    "UndoTrashConfirm": "Restore from trash: {summary}?",
+    "UndoFilesDone": "Undone: {summary}.",
+    "Summary": {
+      "Move": "Moved {from} → {to}",
+      "TrashOne": "Trashed {name}",
+      "TrashMany": "Trashed {n} items"
+    },
+    "Sidecar": {
+      "Ok": "Server helper connected (v{version}): move, rename and trash are on.",
+      "Checking": "Checking for the server helper…",
+      "no-token": "Server helper not set up: move and delete are off. See the README to install it.",
+      "unauthorized": "Server helper found, but the token was rejected. Check the token in settings.",
+      "unreachable": "Server helper not reachable. Check the URL setting and your proxy route.",
+      "incompatible": "Server helper version doesn't match this module. Update both.",
+      "Recheck": "Click to check the connection again",
+      "NeededForUndo": "Undoing this needs the server helper, which isn't connected right now."
+    },
+    "Toolbar": "File Steward"
   }
 }

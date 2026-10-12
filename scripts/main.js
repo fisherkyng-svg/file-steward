@@ -5,6 +5,7 @@ import { StewardApp } from "./app.js";
 import { MODULE_ID, buildWorldIndex } from "./foundry/world.js";
 import { normalizeFolder } from "./core/paths.js";
 import { registerHistorySetting, getHistory } from "./foundry/rewrite.js";
+import { registerSidecarSettings, probe } from "./foundry/sidecar.js";
 
 let app = null;
 
@@ -15,7 +16,9 @@ function open(path, options = {}) {
   }
   app ??= new StewardApp();
   if (path !== undefined) app.setTarget(path, options);
+  const wasRendered = app.rendered;
   app.render(true);
+  if (wasRendered && app.state.sidecar.state !== "ok") app.refreshSidecar();
   return app;
 }
 
@@ -38,6 +41,8 @@ const api = {
   open,
   /** Recent File Steward changes, newest first. */
   history: () => getHistory(),
+  /** Is the server helper reachable with this browser's token? */
+  sidecarStatus: () => probe(),
   async findReferences(path, { folder } = {}) {
     if (!game.user?.isGM) throw new Error("File Steward is GM-only");
     const { index, normalize } = await buildWorldIndex();
@@ -49,6 +54,7 @@ const api = {
 
 Hooks.once("init", () => {
   registerHistorySetting();
+  registerSidecarSettings();
   game.settings.register(MODULE_ID, "caseSensitive", {
     name: "FILESTEWARD.Settings.CaseSensitive.Name",
     hint: "FILESTEWARD.Settings.CaseSensitive.Hint",
@@ -80,4 +86,28 @@ Hooks.once("init", () => {
 
   const mod = game.modules.get(MODULE_ID);
   if (mod) mod.api = api;
+});
+
+/**
+ * Toolbar button (left-hand scene controls) for the GM, on the Token and Tile layers.
+ * v13+ passes controls as an object keyed by name; v12 passed an array.
+ */
+Hooks.on("getSceneControlButtons", (controls) => {
+  if (!game.user?.isGM) return;
+  const make = (order) => ({
+    name: "file-steward",
+    title: "FILESTEWARD.Toolbar",
+    icon: "fa-solid fa-folder-tree",
+    order,
+    button: true,
+    visible: true,
+    onChange: () => open(),
+    onClick: () => open(), // v12
+  });
+  for (const key of ["tokens", "token", "tiles"]) {
+    const group = Array.isArray(controls) ? controls.find((c) => c.name === key) : controls[key];
+    if (!group?.tools) continue;
+    if (Array.isArray(group.tools)) group.tools.push(make(group.tools.length));
+    else group.tools["file-steward"] = make(Object.keys(group.tools).length);
+  }
 });

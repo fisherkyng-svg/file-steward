@@ -56,7 +56,7 @@ class FakeAppV2 {
 
 globalThis.window = { location: { origin: "https://vtm.example.net" } };
 globalThis.CONFIG = {};
-globalThis.Hooks = { once: (n, fn) => (hooks[n] = fn) };
+globalThis.Hooks = { once: (n, fn) => (hooks[n] = fn), on: (n, fn) => (hooks[n] = fn) };
 globalThis.ui = { notifications: { warn: (m) => (globalThis.lastWarn = m), error: (m) => { throw new Error(m); }, info: () => {} } };
 globalThis.foundry = {
   applications: { api: { ApplicationV2: FakeAppV2 }, apps: { FilePicker: { implementation: FakeFilePicker } } },

@@ -70,4 +70,6 @@ jobs:
           files: |
             module.json
             file-steward.zip
+            sidecar/server.mjs
+            sidecar/install.sh
           generate_release_notes: true

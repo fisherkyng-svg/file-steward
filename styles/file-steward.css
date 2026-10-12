@@ -132,3 +132,14 @@
   font-family: var(--font-mono, monospace);
   font-size: var(--font-size-12, 12px);
 }
+
+.file-steward .fs-sidecar {
+  margin: 0;
+  font-size: var(--font-size-12, 12px);
+}
+.file-steward .fs-sidecar a { cursor: pointer; }
+.file-steward .fs-sidecar.fs-ok { color: var(--color-level-success, #3c9a3c); }
+.file-steward .fs-sidecar.fs-warn { color: var(--color-level-warning, #d9a400); }
+.file-steward .fs-sidecar.fs-muted { opacity: 0.75; }
+.file-steward .fs-twin-cell button.fs-small + button.fs-small { margin-left: 0.25rem; }
+.file-steward-dialog ul { margin: 0.25rem 0; padding-left: 1.2rem; max-height: 14rem; overflow: auto; }
