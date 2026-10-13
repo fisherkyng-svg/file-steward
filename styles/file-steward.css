@@ -143,3 +143,34 @@
 .file-steward .fs-sidecar.fs-muted { opacity: 0.75; }
 .file-steward .fs-twin-cell button.fs-small + button.fs-small { margin-left: 0.25rem; }
 .file-steward-dialog ul { margin: 0.25rem 0; padding-left: 1.2rem; max-height: 14rem; overflow: auto; }
+
+.file-steward .fs-check { width: 1.6rem; text-align: center; }
+.file-steward .fs-check input { margin: 0; }
+.file-steward .fs-thumb-cell { width: 64px; }
+.file-steward .fs-thumb {
+  display: block;
+  width: 56px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 3px;
+  cursor: zoom-in;
+  background: rgba(0, 0, 0, 0.25);
+}
+.file-steward .fs-thumb-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 1.2em;
+  opacity: 0.8;
+}
+.file-steward span.fs-thumb-icon { cursor: default; }
+.file-steward .fs-preview { margin-bottom: 0.5rem; }
+.file-steward .fs-thumb-large {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 180px;
+  object-fit: contain;
+}
+.file-steward .fs-muted-text { font-size: var(--font-size-12, 12px); opacity: 0.75; }

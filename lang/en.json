@@ -169,6 +169,17 @@
       "Recheck": "Click to check the connection again",
       "NeededForUndo": "Undoing this needs the server helper, which isn't connected right now."
     },
-    "Toolbar": "File Steward"
+    "Toolbar": "File Steward",
+    "Select": "Select",
+    "SelectAll": "Select all",
+    "SelectHint": "Tick files to act on several at once (Shift-click selects a range).",
+    "TrashSelected": "Trash selected ({n})",
+    "RestoreSelected": "Restore selected ({n})",
+    "PurgeSelected": "Delete selected forever ({n})",
+    "PurgeSelectedConfirm": "Permanently delete {n} selected item(s)?",
+    "RestoredN": "Restored {n} item(s).",
+    "PreviewHint": "Click to preview",
+    "PreviewFailed": "Couldn't play that file in the browser.",
+    "Close": "Close"
   }
 }

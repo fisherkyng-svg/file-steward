@@ -235,12 +235,12 @@ test("trash view: list, restore one, empty the rest", async () => {
   assert.ok(!(await exists(D("1 - NYC", "Old Sketch.png"))), "purged for real");
 });
 
-test("toolbar button in v13 object shape and v12 array shape, GM only", () => {
+test("toolbar button on every layer, v13 object shape and v12 array shape, GM only", () => {
   const v13 = { tokens: { tools: { select: {} } }, tiles: { tools: { select: {} } }, walls: { tools: {} } };
   hooks.getSceneControlButtons(v13);
   assert.equal(v13.tokens.tools["file-steward"].icon, "fa-solid fa-folder-tree");
   assert.ok(v13.tiles.tools["file-steward"].button);
-  assert.equal(v13.walls.tools["file-steward"], undefined);
+  assert.ok(v13.walls.tools["file-steward"], "visible on the Walls layer too");
   const v12 = [{ name: "token", tools: [] }, { name: "tiles", tools: [] }];
   hooks.getSceneControlButtons(v12);
   assert.equal(v12[0].tools[0].name, "file-steward");
@@ -249,4 +249,46 @@ test("toolbar button in v13 object shape and v12 array shape, GM only", () => {
   hooks.getSceneControlButtons(p);
   assert.equal(p.tokens.tools["file-steward"], undefined, "players don't get the button");
   game.user.isGM = true;
+});
+
+test("unused report shows thumbnails and checkboxes; trash selected, restore selected, delete selected forever", async () => {
+  await fsp.mkdir(D("sel"), { recursive: true });
+  await fsp.writeFile(D("sel", "One Map.png"), "1");
+  await fsp.writeFile(D("sel", "two.webp"), "2");
+  app.setTarget("sel", { isFolder: true });
+  await act.unused.call(app);
+  assert.match(app.html, /<img class="fs-thumb" loading="lazy" src="\/sel\/One%20Map.png"/);
+  assert.match(app.html, /class="fs-select-all"/);
+  assert.match(app.html, /Trash selected \(0\)/);
+
+  // tick two rows (what the checkbox clicks do), then trash them together
+  const paths = app.state.unused.map((f) => f.path);
+  assert.equal(paths.length, 2);
+  for (const p of paths) app.state.selected.add(p);
+  await act.trashSelected.call(app);
+  assert.match(app.state.status, /Moved 2 item\(s\) to trash/);
+  assert.ok(!(await exists(D("sel", "One Map.png"))));
+  assert.equal(app.state.selected.size, 0, "selection cleared after the list reloads");
+
+  await act.showTrash.call(app);
+  assert.equal(app.state.trash.length, 2);
+  assert.match(app.html, /Restore selected \(0\)/);
+  const [a, b] = app.state.trash;
+  app.state.selected.add(a.id);
+  await act.restoreSelected.call(app);
+  assert.match(app.state.status, /Restored 1 item/);
+  assert.ok(await exists(D(...a.path.split("/"))), "restored on disk");
+
+  app.state.selected.add(b.id);
+  dialogs.length = 0;
+  await act.purgeSelected.call(app);
+  assert.match(dialogs[0].content, /Permanently delete 1 selected item/);
+  assert.equal(app.state.trash.length, 0);
+  assert.ok(!(await exists(D(...b.path.split("/")))), "purged for real");
+});
+
+test("refs view previews the target file", async () => {
+  app.setTarget("1%20-%20NYC/Atrium.webp", { isFolder: false });
+  await act.scan.call(app);
+  assert.match(app.html, /<div class="fs-preview"><img class="fs-thumb fs-thumb-large"/);
 });

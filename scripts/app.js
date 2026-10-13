@@ -31,6 +31,33 @@ const baseName = (p) => decodeSafe(p).split("/").pop();
 /** An unused .webp whose twin in use is not .webp: switching to it is the safe bulk direction. */
 const isWebpUpgrade = (f) => !!f.twin && /\.webp$/i.test(f.path) && !/\.webp$/i.test(f.twin);
 const plural = (n, one, many) => L(n === 1 ? one : many);
+const extOf = (p) => (decodeSafe(p).match(/\.([a-z0-9]+)$/i)?.[1] ?? "").toLowerCase();
+const IMAGE_EXT = new Set(["webp", "png", "jpg", "jpeg", "gif", "svg", "avif", "bmp", "tif", "tiff"]);
+const VIDEO_EXT = new Set(["webm", "mp4", "m4v", "ogv", "mov"]);
+const AUDIO_EXT = new Set(["mp3", "ogg", "oga", "wav", "flac", "m4a", "aac", "opus"]);
+const mediaKind = (p) => {
+  const e = extOf(p);
+  return IMAGE_EXT.has(e) ? "image" : VIDEO_EXT.has(e) ? "video" : AUDIO_EXT.has(e) ? "audio" : "other";
+};
+/** URL Foundry serves a Data-relative path at (honors routePrefix). */
+const mediaUrl = (p) => {
+  const rel = String(p).replace(/^\/+/, "");
+  try { return foundry.utils.getRoute(rel); } catch { return `/${rel}`; }
+};
+const FILE_ICONS = { pdf: "fa-file-pdf", json: "fa-file-code", txt: "fa-file-lines", md: "fa-file-lines", ttf: "fa-font", otf: "fa-font", woff: "fa-font", woff2: "fa-font" };
+
+/** Small thumbnail cell content; clicking it opens a larger preview. */
+function thumbHTML(path, { large = false } = {}) {
+  const kind = mediaKind(path);
+  const url = esc(mediaUrl(path));
+  const cls = large ? "fs-thumb fs-thumb-large" : "fs-thumb";
+  const attrs = `data-action="preview" data-path="${esc(path)}" data-tooltip="${esc(L("PreviewHint"))}"`;
+  if (kind === "image") return `<img class="${cls}" loading="lazy" src="${url}" alt="" ${attrs}>`;
+  if (kind === "video") return `<video class="${cls}" muted preload="metadata" src="${url}#t=0.5" ${attrs}></video>`;
+  if (kind === "audio") return `<a class="${cls} fs-thumb-icon" ${attrs}><i class="fa-solid fa-volume-high"></i></a>`;
+  return `<span class="${cls} fs-thumb-icon"><i class="fa-solid ${FILE_ICONS[extOf(path)] ?? "fa-file"}"></i></span>`;
+}
+
 const fmtSize = (b) => (b == null ? "" : b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`);
 
 /** Decoded path for rewriting: no leading slash; folders end in "/". */
@@ -66,6 +93,10 @@ export class StewardApp extends ApplicationV2 {
       restoreItem: StewardApp.#onRestoreItem,
       purgeItem: StewardApp.#onPurgeItem,
       purgeAll: StewardApp.#onPurgeAll,
+      trashSelected: StewardApp.#onTrashSelected,
+      restoreSelected: StewardApp.#onRestoreSelected,
+      purgeSelected: StewardApp.#onPurgeSelected,
+      preview: StewardApp.#onPreview,
     },
   };
 
@@ -83,7 +114,11 @@ export class StewardApp extends ApplicationV2 {
     retentionDays: null,
     notes: [],
     sidecar: { state: "checking" },
+    selected: new Set(), // checked rows: file paths (unused) or trash ids (trash)
   };
+
+  #lastChecked = null;
+  #audio = null;
 
   /** True when the server helper answered with a valid token. */
   get #helper() {
@@ -171,12 +206,82 @@ export class StewardApp extends ApplicationV2 {
       if (v !== this.state.display) this.setTarget(v);
       StewardApp.#onScan.call(this);
     });
+    this.#wireSelection();
+  }
+
+  #checkbox(key) {
+    return `<input type="checkbox" class="fs-select" data-key="${esc(key)}" ${this.state.selected.has(key) ? "checked" : ""} ${this.state.busy ? "disabled" : ""} aria-label="${esc(L("Select"))}">`;
+  }
+
+  #checkAll() {
+    return `<input type="checkbox" class="fs-select-all" ${this.state.busy ? "disabled" : ""} aria-label="${esc(L("SelectAll"))}" data-tooltip="${esc(L("SelectAll"))}">`;
+  }
+
+  /** A button whose label carries the live selection count. */
+  #selButton(action, key, icon) {
+    const n = this.state.selected.size;
+    return `<button type="button" data-action="${action}" data-sel-key="${key}" ${n && !this.state.busy ? "" : "disabled"}><i class="fa-solid ${icon}"></i> <span class="fs-sel-label">${esc(F(key, { n }))}</span></button>`;
+  }
+
+  /** Update counts and the select-all box without re-rendering (keeps scroll position). */
+  #syncSelection() {
+    const root = this.element;
+    if (!root?.querySelectorAll) return;
+    const n = this.state.selected.size;
+    for (const b of root.querySelectorAll("[data-sel-key]")) {
+      b.disabled = !n || this.state.busy;
+      const label = b.querySelector(".fs-sel-label");
+      if (label) label.textContent = F(b.dataset.selKey, { n });
+    }
+    const boxes = [...root.querySelectorAll("input.fs-select")];
+    const all = root.querySelector("input.fs-select-all");
+    if (all) {
+      const checked = boxes.filter((b) => b.checked).length;
+      all.checked = checked > 0 && checked === boxes.length;
+      all.indeterminate = checked > 0 && checked < boxes.length;
+    }
+  }
+
+  #wireSelection() {
+    const root = this.element;
+    if (!root?.querySelectorAll) return;
+    const boxes = [...root.querySelectorAll("input.fs-select")];
+    boxes.forEach((box, i) =>
+      box.addEventListener("click", (ev) => {
+        // Shift-click selects or clears the whole range since the last click.
+        const from = ev.shiftKey && this.#lastChecked !== null ? Math.min(this.#lastChecked, i) : i;
+        const to = ev.shiftKey && this.#lastChecked !== null ? Math.max(this.#lastChecked, i) : i;
+        for (let j = from; j <= to; j++) {
+          boxes[j].checked = box.checked;
+          if (box.checked) this.state.selected.add(boxes[j].dataset.key);
+          else this.state.selected.delete(boxes[j].dataset.key);
+        }
+        this.#lastChecked = i;
+        this.#syncSelection();
+      })
+    );
+    root.querySelector("input.fs-select-all")?.addEventListener("change", (ev) => {
+      for (const b of boxes) {
+        b.checked = ev.target.checked;
+        if (b.checked) this.state.selected.add(b.dataset.key);
+        else this.state.selected.delete(b.dataset.key);
+      }
+      this.#syncSelection();
+    });
+    this.#syncSelection();
+  }
+
+  /** Clear the selection whenever the list underneath it changes. */
+  #clearSelection() {
+    this.state.selected = new Set();
+    this.#lastChecked = null;
   }
 
   #resultsHTML() {
     const s = this.state;
     if (s.mode === "refs") {
-      if (!s.refs.length) return `<p class="fs-empty">${L("NoRefs")}</p>`;
+      const preview = !s.isFolder && s.target ? `<div class="fs-preview">${thumbHTML(s.target, { large: true })}</div>` : "";
+      if (!s.refs.length) return `${preview}<p class="fs-empty">${L("NoRefs")}</p>`;
       const rows = [...s.refs]
         .sort((a, b) => a.rootLabel.localeCompare(b.rootLabel) || a.field.localeCompare(b.field))
         .slice(0, MAX_ROWS)
@@ -190,7 +295,7 @@ export class StewardApp extends ApplicationV2 {
           return `<tr><td>${doc}</td><td>${esc(where)}</td>${file}<td><span class="fs-kind fs-kind-${r.kind}">${esc(L(`Kind.${r.kind}`))}</span></td></tr>`;
         })
         .join("");
-      return `<table class="fs-table"><thead><tr><th>${L("Col.Document")}</th><th>${L("Col.Where")}</th>${s.isFolder ? `<th>${L("Col.File")}</th>` : ""}<th>${L("Col.Kind")}</th></tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.refs.length)}`;
+      return `${preview}<table class="fs-table"><thead><tr><th>${L("Col.Document")}</th><th>${L("Col.Where")}</th>${s.isFolder ? `<th>${L("Col.File")}</th>` : ""}<th>${L("Col.Kind")}</th></tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.refs.length)}`;
     }
     if (s.mode === "unused") {
       if (!s.unused.length) return `<p class="fs-empty">${L("NoUnused")}</p>`;
@@ -202,7 +307,10 @@ export class StewardApp extends ApplicationV2 {
            ${toWebp.length ? `<button type="button" data-action="relinkAllTwins" ${dis} data-tooltip="${esc(L("RelinkAllTwinsHint"))}"><i class="fa-solid fa-right-left"></i> ${esc(F("RelinkAllTwins", { n: toWebp.length }))}</button>` : ""}</div>`
         : "";
       const bulkTrash = this.#helper
-        ? `<div class="fs-row fs-twins-bar"><span></span><button type="button" data-action="trashAllUnused" ${dis}><i class="fa-solid fa-trash-can"></i> ${esc(F("TrashAllUnused", { n: s.unused.length }))}</button></div>`
+        ? `<div class="fs-row fs-twins-bar"><span class="fs-muted-text">${esc(L("SelectHint"))}</span><span class="fs-row">
+            ${this.#selButton("trashSelected", "TrashSelected", "fa-trash-can")}
+            <button type="button" data-action="trashAllUnused" ${dis}><i class="fa-solid fa-trash-can"></i> ${esc(F("TrashAllUnused", { n: s.unused.length }))}</button>
+          </span></div>`
         : "";
       const rows = s.unused
         .slice(0, MAX_ROWS)
@@ -215,10 +323,12 @@ export class StewardApp extends ApplicationV2 {
           const del = this.#helper
             ? `<button type="button" class="fs-small" data-action="trashFile" data-path="${esc(f.path)}" ${dis} data-tooltip="${esc(L("TrashOneHint"))}"><i class="fa-solid fa-trash-can"></i></button>`
             : "";
-          return `<tr><td class="fs-path">${esc(f.display)}</td><td class="fs-twin-cell">${twin}${del}</td></tr>`;
+          const check = this.#helper ? `<td class="fs-check">${this.#checkbox(f.path)}</td>` : "";
+          return `<tr>${check}<td class="fs-thumb-cell">${thumbHTML(f.path)}</td><td class="fs-path">${esc(f.display)}</td><td class="fs-twin-cell">${twin}${del}</td></tr>`;
         })
         .join("");
-      return `${bulk}${bulkTrash}<table class="fs-table"><thead><tr><th>${L("Col.File")}</th><th></th></tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.unused.length)}`;
+      const head = `${this.#helper ? `<th class="fs-check">${this.#checkAll()}</th>` : ""}<th></th><th>${L("Col.File")}</th><th></th>`;
+      return `${bulk}${bulkTrash}<table class="fs-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.unused.length)}`;
     }
     if (s.mode === "trash") {
       const dis = s.busy ? "disabled" : "";
@@ -227,6 +337,7 @@ export class StewardApp extends ApplicationV2 {
       const rows = s.trash
         .slice(0, MAX_ROWS)
         .map((t) => `<tr>
+          <td class="fs-check">${this.#checkbox(t.id)}</td>
           <td class="fs-path">${t.isDir ? '<i class="fa-solid fa-folder"></i> ' : ""}${esc(t.path)}</td>
           <td>${esc(fmtSize(t.size))}</td>
           <td>${esc(new Date(t.trashedAt).toLocaleString())}</td>
@@ -237,8 +348,12 @@ export class StewardApp extends ApplicationV2 {
         .join("");
       const total = s.trash.reduce((n, t) => n + (t.size ?? 0), 0);
       return `<div class="fs-row fs-twins-bar"><span>${esc(F("TrashSummary", { n: s.trash.length, size: fmtSize(total) }))} ${esc(retention)}</span>
-          <button type="button" data-action="purgeAll" ${dis}><i class="fa-solid fa-fire"></i> ${L("PurgeAll")}</button></div>
-        <table class="fs-table"><thead><tr><th>${L("Col.Original")}</th><th>${L("Col.Size")}</th><th>${L("Col.Trashed")}</th><th></th></tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.trash.length)}`;
+          <span class="fs-row">
+            ${this.#selButton("restoreSelected", "RestoreSelected", "fa-rotate-left")}
+            ${this.#selButton("purgeSelected", "PurgeSelected", "fa-xmark")}
+            <button type="button" data-action="purgeAll" ${dis}><i class="fa-solid fa-fire"></i> ${L("PurgeAll")}</button>
+          </span></div>
+        <table class="fs-table"><thead><tr><th class="fs-check">${this.#checkAll()}</th><th>${L("Col.Original")}</th><th>${L("Col.Size")}</th><th>${L("Col.Trashed")}</th><th></th></tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.trash.length)}`;
     }
     return `<p class="fs-empty">${L("Intro")}</p>`;
   }
@@ -375,6 +490,7 @@ export class StewardApp extends ApplicationV2 {
       .sort((a, b) => a.display.localeCompare(b.display));
     s.mode = "unused";
     s.unused = unused;
+    this.#clearSelection();
     s.status = F("UnusedFound", { unused: unused.length, files: files.length, scanned: index.documents });
     s.notes = this.#caveats(true);
     if (truncated) s.notes.unshift(L("ListTruncated"));
@@ -830,6 +946,7 @@ export class StewardApp extends ApplicationV2 {
     const res = await sidecar.listTrash();
     this.state.mode = "trash";
     this.state.trash = res.items;
+    this.#clearSelection();
     this.state.retentionDays = res.retentionDays;
     this.state.status = "";
   }
@@ -886,5 +1003,90 @@ export class StewardApp extends ApplicationV2 {
       await this.#loadTrash();
       this.state.status = F("PurgedN", { n: r.purged });
     });
+  }
+
+  /* ---------- selection actions ---------- */
+
+  static async #onTrashSelected() {
+    const keys = [...this.state.selected];
+    if (keys.length) await this.#trashPaths(keys.map((path) => ({ path, isFolder: false })), { fromUnused: true });
+  }
+
+  static async #onRestoreSelected() {
+    const ids = [...this.state.selected];
+    if (!ids.length) return;
+    await this.#run(async () => {
+      const r = await sidecar.restore(ids);
+      await this.#loadTrash();
+      this.state.status = F("RestoredN", { n: r.restored.length });
+      this.state.notes = r.errors.map((e) => F("RestoreFailed", { id: e.id, error: e.error }));
+    });
+  }
+
+  static async #onPurgeSelected() {
+    const ids = [...this.state.selected];
+    if (!ids.length) return;
+    const items = this.state.trash.filter((t) => this.state.selected.has(t.id));
+    const list = items.slice(0, 15).map((t) => `<li class="fs-path">${esc(t.path)}</li>`).join("");
+    const ok = await DialogV2.confirm({
+      window: { title: L("PurgeTitle"), icon: "fa-solid fa-fire" },
+      classes: ["file-steward-dialog"],
+      content: `<p>${esc(F("PurgeSelectedConfirm", { n: ids.length }))}</p><ul>${list}</ul>${items.length > 15 ? `<p>${esc(F("MoreRows", { n: items.length - 15 }))}</p>` : ""}<p><strong>${esc(L("PurgeWarn"))}</strong></p>`,
+      yes: { label: L("PurgeYes") },
+      no: { label: L("Keep"), default: true },
+      rejectClose: false,
+      modal: true,
+    });
+    if (!ok) return;
+    await this.#run(async () => {
+      const r = await sidecar.purge({ ids });
+      await this.#loadTrash();
+      this.state.status = F("PurgedN", { n: r.purged });
+    });
+  }
+
+  /* ---------- preview ---------- */
+
+  static async #onPreview(event, target) {
+    const path = target.dataset.path;
+    if (!path) return;
+    const kind = mediaKind(path);
+    const url = mediaUrl(path);
+    const title = baseName(path);
+    if (kind === "audio") {
+      // Click toggles play/stop; a second file stops the first.
+      if (this.#audio && this.#audio.dataset === path && !this.#audio.el.paused) {
+        this.#audio.el.pause();
+        this.#audio = null;
+        return;
+      }
+      this.#audio?.el.pause();
+      const el = new Audio(url);
+      el.volume = 0.6;
+      this.#audio = { el, dataset: path };
+      el.play().catch(() => ui.notifications.warn(L("PreviewFailed")));
+      return;
+    }
+    if (kind === "image") {
+      const IP = foundry.applications?.apps?.ImagePopout;
+      if (IP) new IP({ src: url, window: { title } }).render(true);
+      else new globalThis.ImagePopout(url, { title }).render(true);
+      return;
+    }
+    if (kind === "video") {
+      new DialogV2({
+        window: { title, resizable: true },
+        classes: ["file-steward-dialog"],
+        position: { width: 720 },
+        content: `<video src="${esc(url)}" controls autoplay style="width:100%;max-height:70vh"></video>`,
+        buttons: [{ action: "close", label: L("Close"), default: true }],
+      }).render(true);
+    }
+  }
+
+  async close(options) {
+    this.#audio?.el.pause();
+    this.#audio = null;
+    return super.close(options);
   }
 }

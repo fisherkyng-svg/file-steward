@@ -89,8 +89,9 @@ Hooks.once("init", () => {
 });
 
 /**
- * Toolbar button (left-hand scene controls) for the GM, on the Token and Tile layers.
- * v13+ passes controls as an object keyed by name; v12 passed an array.
+ * Toolbar button for the GM, added to every control group (Tokens, Tiles, Walls, Lighting, …)
+ * so it's visible whichever layer is active. v13+ passes controls as an object keyed by name;
+ * v12 passed an array.
  */
 Hooks.on("getSceneControlButtons", (controls) => {
   if (!game.user?.isGM) return;
@@ -104,8 +105,8 @@ Hooks.on("getSceneControlButtons", (controls) => {
     onChange: () => open(),
     onClick: () => open(), // v12
   });
-  for (const key of ["tokens", "token", "tiles"]) {
-    const group = Array.isArray(controls) ? controls.find((c) => c.name === key) : controls[key];
+  const groups = Array.isArray(controls) ? controls : Object.values(controls ?? {});
+  for (const group of groups) {
     if (!group?.tools) continue;
     if (Array.isArray(group.tools)) group.tools.push(make(group.tools.length));
     else group.tools["file-steward"] = make(Object.keys(group.tools).length);
