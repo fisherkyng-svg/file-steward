@@ -8,6 +8,7 @@ GM-only file housekeeping for Foundry VTT v13–v14.
 - **Switch all to WebP** *(0.2)*: from the unused report, relink every used `.png`/`.jpg` to its `.webp` twin in one step. It never switches the other way in bulk.
 - **Undo** *(0.2)*: puts back every field the last change touched. A field edited by hand since then is left alone and reported.
 - **Previews** *(0.4)*: thumbnails beside every file in the unused report and above the references list; click to open the image or video full size, or to play/stop audio.
+- **Upload many files** *(0.5)*: pick a folder, then click **Upload files…** and choose as many files as you like, or drag them from your computer onto the window. Files already in the folder are skipped unless you choose to replace them. No server helper needed.
 - **Select several** *(0.4)*: tick files (Shift-click for a range, or the header box for all) and trash them together; in the Trash view, restore or permanently delete the ticked items.
 - **Export CSV** of either report.
 - **With the server helper** *(0.3)*: **Move / rename** a file or folder and update everything that uses it, **Move to trash** (blocked while the file is still used), a **Trash** view to restore or permanently delete, and bulk **Move all to trash** from the unused report.

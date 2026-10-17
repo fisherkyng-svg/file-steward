@@ -3,12 +3,15 @@
  * 0.1: find references, find unused files, export CSV (read-only).
  * 0.2: relink references to another file or folder, use twins, undo.
  * 0.3: with the server helper (sidecar): move/rename, move to trash, restore, empty trash.
+ * 0.4: multi-select, previews. 0.5: upload many files into a folder (button or drag and drop).
  */
 import { normalizeFolder } from "./core/paths.js";
 import { ReferenceIndex } from "./core/index.js";
 import { planRelink, findTwins } from "./core/rewrite.js";
+import { planUploads, joinPath } from "./core/upload.js";
 import {
   MODULE_ID, FilePickerClass, resolveUuid, saveFile, buildWorldIndex, listFiles, worldPackCount,
+  uploadableExtensions, folderFiles, uploadFile,
 } from "./foundry/world.js";
 import { applyChanges, undoRecords, existingFiles, getHistory, pushOperation, markUndone } from "./foundry/rewrite.js";
 import { probe, sidecar } from "./foundry/sidecar.js";
@@ -97,6 +100,7 @@ export class StewardApp extends ApplicationV2 {
       restoreSelected: StewardApp.#onRestoreSelected,
       purgeSelected: StewardApp.#onPurgeSelected,
       preview: StewardApp.#onPreview,
+      upload: StewardApp.#onUpload,
     },
   };
 
@@ -107,8 +111,9 @@ export class StewardApp extends ApplicationV2 {
     source: "data",
     busy: false,
     status: "",
-    mode: null, // "refs" | "unused" | "trash"
+    mode: null, // "refs" | "unused" | "trash" | "uploads"
     refs: [],
+    uploads: [], // {path, display, result: "added"|"replaced"|"failed"|"skipped", note}
     unused: [],
     trash: [],
     retentionDays: null,
@@ -119,6 +124,7 @@ export class StewardApp extends ApplicationV2 {
 
   #lastChecked = null;
   #audio = null;
+  #dropWired = null;
 
   /** True when the server helper answered with a valid token. */
   get #helper() {
@@ -152,6 +158,8 @@ export class StewardApp extends ApplicationV2 {
           <button type="button" data-action="unused" ${dis}><i class="fa-solid fa-broom"></i> ${L("FindUnused")}</button>
           <button type="button" data-action="relink" ${dis} data-tooltip="${esc(L("RelinkHint"))}"><i class="fa-solid fa-link"></i> ${L("RelinkBtn")}</button>
           <button type="button" data-action="exportCsv" ${hasResults && !s.busy ? "" : "disabled"}><i class="fa-solid fa-file-csv"></i> ${L("Export")}</button>
+          <button type="button" data-action="upload" ${dis} data-tooltip="${esc(L("UploadHint"))}"><i class="fa-solid fa-upload"></i> ${L("UploadBtn")}</button>
+          <input type="file" class="fs-upload-input" multiple hidden>
         </div>
         ${this.#helper ? `<div class="fs-row fs-actions">
           <button type="button" data-action="move" ${dis} data-tooltip="${esc(L("MoveHint"))}"><i class="fa-solid fa-file-export"></i> ${L("MoveBtn")}</button>
@@ -207,6 +215,137 @@ export class StewardApp extends ApplicationV2 {
       StewardApp.#onScan.call(this);
     });
     this.#wireSelection();
+    this.#wireUpload();
+  }
+
+  /* ---------- upload: button and drag-and-drop onto the window ---------- */
+
+  #wireUpload() {
+    const root = this.element;
+    if (!root?.querySelector) return;
+    root.querySelector("input.fs-upload-input")?.addEventListener("change", (ev) => {
+      const files = [...(ev.target.files ?? [])];
+      ev.target.value = ""; // so picking the same files again still fires
+      if (files.length) this.uploadFiles(files);
+    });
+    // The window element outlives re-renders, so its drop listeners are added once.
+    if (this.#dropWired === root) return;
+    this.#dropWired = root;
+    const hasFiles = (ev) => [...(ev.dataTransfer?.types ?? [])].includes("Files");
+    root.addEventListener("dragover", (ev) => {
+      if (!hasFiles(ev) || this.state.busy) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.dataTransfer.dropEffect = this.#uploadFolder() ? "copy" : "none";
+      root.classList.add("fs-dropping");
+    });
+    root.addEventListener("dragleave", (ev) => {
+      if (!root.contains(ev.relatedTarget)) root.classList.remove("fs-dropping");
+    });
+    root.addEventListener("drop", (ev) => {
+      root.classList.remove("fs-dropping");
+      if (!hasFiles(ev)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const files = [...(ev.dataTransfer.files ?? [])];
+      if (files.length) this.uploadFiles(files);
+    });
+  }
+
+  /** The folder uploads go into: the chosen folder, or null with a warning. */
+  #uploadFolder({ warn = false } = {}) {
+    this.#readInput();
+    const s = this.state;
+    if (!s.target || !s.isFolder) {
+      if (warn) ui.notifications.warn(L("NeedUploadFolder"));
+      return null;
+    }
+    if (s.source === "s3") {
+      if (warn) ui.notifications.warn(L("NoS3Upload"));
+      return null;
+    }
+    // Foundry's uploader wants the real folder name: "my music", not "my%20music".
+    return decodeSafe(s.target).replace(/^\/+|\/+$/g, "");
+  }
+
+  static #onUpload() {
+    if (!this.#uploadFolder({ warn: true })) return;
+    this.element?.querySelector("input.fs-upload-input")?.click();
+  }
+
+  /** Upload files one at a time into the chosen folder, asking before replacing anything. */
+  async uploadFiles(files) {
+    const folder = this.#uploadFolder({ warn: true });
+    if (!folder) return;
+    const s = this.state;
+    await this.#run(async () => {
+      this.#setStatus(L("Listing"));
+      const existing = await folderFiles(s.source, folder);
+      const caseSensitive = game.settings.get(MODULE_ID, "caseSensitive") !== false;
+      const plan = planUploads(files, existing, { allowed: uploadableExtensions(), caseSensitive });
+      const display = (name) => joinPath(folder, name);
+
+      let replace = [];
+      if (plan.conflicts.length) {
+        const list = plan.conflicts.slice(0, 15).map((f) => `<li class="fs-path">${esc(f.name)}</li>`).join("");
+        const more = plan.conflicts.length > 15 ? `<p>${esc(F("MoreRows", { n: plan.conflicts.length - 15 }))}</p>` : "";
+        const choice = await DialogV2.wait({
+          window: { title: L("UploadExistsTitle"), icon: "fa-solid fa-upload" },
+          classes: ["file-steward-dialog"],
+          content: `<p>${esc(F("UploadExists", { n: plan.conflicts.length }))}</p><ul>${list}</ul>${more}<p>${esc(L("UploadReplaceWarn"))}</p>`,
+          buttons: [
+            { action: "skip", label: L("UploadSkipExisting"), icon: "fa-solid fa-forward", default: true },
+            { action: "replace", label: L("UploadReplace"), icon: "fa-solid fa-arrows-rotate" },
+            { action: "cancel", label: L("Cancel"), icon: "fa-solid fa-xmark" },
+          ],
+          rejectClose: false,
+          modal: true,
+        });
+        if (!choice || choice === "cancel") {
+          s.status = L("Cancelled");
+          return;
+        }
+        if (choice === "replace") replace = plan.conflicts;
+      }
+
+      const results = [];
+      for (const k of plan.skipped) {
+        results.push({ path: display(k.name), display: display(k.name), result: "skipped", note: L(`UploadSkip.${k.reason}`) });
+      }
+      if (!replace.length) {
+        for (const f of plan.conflicts) {
+          results.push({ path: display(f.name), display: display(f.name), result: "skipped", note: L("UploadSkip.exists") });
+        }
+      }
+      const queue = [...plan.upload.map((f) => ({ f, replaced: false })), ...replace.map((f) => ({ f, replaced: true }))];
+      let i = 0;
+      for (const { f, replaced } of queue) {
+        i += 1;
+        this.#setStatus(F("Uploading", { i, n: queue.length, name: f.name }));
+        try {
+          const path = await uploadFile(s.source, folder, f);
+          results.push({ path, display: decodeSafe(path), result: replaced ? "replaced" : "added", note: fmtSize(f.size) });
+        } catch (err) {
+          console.warn(`${MODULE_ID} | upload failed: ${f.name}`, err);
+          results.push({ path: display(f.name), display: display(f.name), result: "failed", note: err.message ?? String(err) });
+        }
+      }
+
+      const order = { failed: 0, added: 1, replaced: 2, skipped: 3 };
+      results.sort((a, b) => order[a.result] - order[b.result] || a.display.localeCompare(b.display));
+      const count = (r) => results.filter((x) => x.result === r).length;
+      this.#clearSelection();
+      s.mode = "uploads";
+      s.uploads = results;
+      s.status = F("UploadDone", {
+        added: count("added") + count("replaced"),
+        folder: decodeSafe(folder),
+        failed: count("failed"),
+        skipped: count("skipped"),
+      });
+      if (count("failed")) ui.notifications.warn(s.status);
+      else ui.notifications.info(s.status);
+    });
   }
 
   #checkbox(key) {
@@ -329,6 +468,20 @@ export class StewardApp extends ApplicationV2 {
         .join("");
       const head = `${this.#helper ? `<th class="fs-check">${this.#checkAll()}</th>` : ""}<th></th><th>${L("Col.File")}</th><th></th>`;
       return `${bulk}${bulkTrash}<table class="fs-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.unused.length)}`;
+    }
+    if (s.mode === "uploads") {
+      if (!s.uploads.length) return `<p class="fs-empty">${L("UploadNone")}</p>`;
+      const icon = { added: "fa-circle-check fs-ok", replaced: "fa-arrows-rotate fs-ok", failed: "fa-circle-xmark fs-warn", skipped: "fa-forward fs-muted" };
+      const rows = s.uploads
+        .slice(0, MAX_ROWS)
+        .map((u) => {
+          const thumb = u.result === "added" || u.result === "replaced" ? thumbHTML(u.path) : "";
+          return `<tr><td class="fs-thumb-cell">${thumb}</td><td class="fs-path">${esc(u.display)}</td>
+            <td class="fs-result"><i class="fa-solid ${icon[u.result]}"></i> ${esc(L(`UploadResult.${u.result}`))}</td>
+            <td class="fs-muted-text">${esc(u.note ?? "")}</td></tr>`;
+        })
+        .join("");
+      return `<table class="fs-table"><thead><tr><th></th><th>${L("Col.File")}</th><th>${L("Col.Result")}</th><th></th></tr></thead><tbody>${rows}</tbody></table>${this.#truncNote(s.uploads.length)}`;
     }
     if (s.mode === "trash") {
       const dis = s.busy ? "disabled" : "";

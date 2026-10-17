@@ -152,6 +152,32 @@ export async function listFiles(source, folder, { maxFiles = 20000, onProgress }
   return { files, truncated: false };
 }
 
+/* ---------- uploads (Foundry's own upload route; no helper needed) ---------- */
+
+/** File extensions this Foundry server accepts for upload, or null if unknown. */
+export function uploadableExtensions() {
+  const list = globalThis.CONST?.UPLOADABLE_FILE_EXTENSIONS;
+  return list ? new Set(Object.keys(list).map((e) => e.toLowerCase())) : null;
+}
+
+/** Names already in one folder (not recursive), as Foundry's browse returns them. */
+export async function folderFiles(source, folder) {
+  const res = await FilePickerClass().browse(source, folder);
+  return res?.files ?? [];
+}
+
+/**
+ * Upload one file with Foundry's own uploader. Resolves with the stored path, or throws.
+ * Foundry replaces a file of the same name, so callers check for conflicts first.
+ */
+export async function uploadFile(source, folder, file) {
+  const res = await FilePickerClass().upload(source, folder, file, {}, { notify: false });
+  if (!res || res.status === "error" || !res.path) {
+    throw new Error(res?.error || res?.message || game.i18n.localize("FILESTEWARD.UploadRejected"));
+  }
+  return res.path;
+}
+
 /** Count compendium packs that belong to the world (scanned in a later phase). */
 export function worldPackCount() {
   return game.packs?.filter((p) => p.metadata?.packageType === "world").length ?? 0;

@@ -174,3 +174,12 @@
   object-fit: contain;
 }
 .file-steward .fs-muted-text { font-size: var(--font-size-12, 12px); opacity: 0.75; }
+
+.file-steward.fs-dropping .window-content {
+  outline: 2px dashed var(--color-border-highlight, #ff6400);
+  outline-offset: -6px;
+}
+.file-steward .fs-result { white-space: nowrap; }
+.file-steward .fs-result .fs-ok { color: var(--color-level-success, #3c9a3c); }
+.file-steward .fs-result .fs-warn { color: var(--color-level-error, #c33); }
+.file-steward .fs-result .fs-muted { opacity: 0.7; }

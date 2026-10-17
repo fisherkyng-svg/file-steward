@@ -43,7 +43,8 @@
       "Kind": "Match",
       "Original": "Original location",
       "Size": "Size",
-      "Trashed": "Trashed"
+      "Trashed": "Trashed",
+      "Result": "Result"
     },
     "Settings": {
       "CaseSensitive": {
@@ -180,6 +181,31 @@
     "RestoredN": "Restored {n} item(s).",
     "PreviewHint": "Click to preview",
     "PreviewFailed": "Couldn't play that file in the browser.",
-    "Close": "Close"
+    "Close": "Close",
+    "UploadBtn": "Upload files…",
+    "UploadHint": "Add files to the chosen folder. You can also drag files from your computer onto this window.",
+    "NeedUploadFolder": "Pick the folder to upload into first (Folder button).",
+    "NoS3Upload": "Uploading into S3 storage isn't supported yet. Use Foundry's file picker for S3.",
+    "UploadExistsTitle": "Some files already exist",
+    "UploadExists": "{n} file(s) with the same name are already in this folder:",
+    "UploadReplaceWarn": "Replacing overwrites the old file for good. Scenes and playlists that use it will show the new file.",
+    "UploadSkipExisting": "Skip those",
+    "UploadReplace": "Replace them",
+    "Cancel": "Cancel",
+    "Uploading": "Uploading {i} of {n}: {name}",
+    "UploadDone": "Uploaded {added} file(s) to {folder}. Failed: {failed}. Skipped: {skipped}.",
+    "UploadNone": "Nothing was uploaded.",
+    "UploadRejected": "The server refused the file.",
+    "UploadResult": {
+      "added": "Added",
+      "replaced": "Replaced",
+      "failed": "Failed",
+      "skipped": "Skipped"
+    },
+    "UploadSkip": {
+      "type": "this file type can't be uploaded to Foundry",
+      "duplicate": "the same name was picked twice",
+      "exists": "already in the folder"
+    }
   }
 }
